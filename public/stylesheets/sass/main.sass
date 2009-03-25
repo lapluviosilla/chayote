@@ -1,0 +1,69 @@
+/* Top Defaults
+html, body, div, dl, dt, dd, ul, ol, li, h1, h2, h3, h4, h5, h6, pre, form, fieldset, input, textarea, p, blockquote, th, td
+  :margin 0px
+  :padding 0px
+  :background transparent
+fieldset, img
+  :border 0px
+h1, h2, h3, h4, h5, h6
+  :font-size 100%
+  :font-weight 100%
+
+body
+  :color #333
+  :font
+    :family 'Lucida Grande', Arial, Verdana, Helvetica, sans-serif
+    :size 75%
+  :padding-bottom 20px
+  :line-height 1.7em
+
+/* Shortcuts
+.floatl
+  :float left
+.floatr
+  :float right
+
+/* Mixins
+=ulnavmenu
+  :list-style
+    :image none
+    :position outside
+    :type none
+  /:padding 7px 0 0 0
+
+/* Bars and tabs at top
+#topbar
+  :height 28px
+  :padding-top 7px
+  :padding-left 15px
+  :padding-right 7px
+  :background url(/images/headbar.gif) repeat-x
+  /:background-color #3D76C4
+  /:border-bottom 1px solid #366CB5
+  :color #FFF
+  #logo
+    :font
+      :size 17px
+      :weight bold
+#mainbar
+  :height 42px
+  :padding-left 40px
+  :background url(/images/subheadbar.gif) repeat-x
+  #maintabs
+    +ulnavmenu
+    /:padding-top 0px
+    :font-size 13px
+    :font-weight bold
+    :line-height 0.9em
+    :text-align left
+    li
+      :background transparent url(/images/default-tab-off-left-blue.png) no-repeat scroll left top
+      :float left
+      :margin 0 8px 0 0
+      :padding-left 8px
+      a
+        :background transparent url(/images/default-tab-off-right-blue.png) no-repeat scroll right top
+        :text-decoration none
+        :color #FFFFFF
+        :display block
+        :padding 12px 14px 24px 8px

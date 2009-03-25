@@ -1,0 +1,19 @@
+!!! XML
+!!! 1.1 Strict
+%html{html_attrs}
+  %head
+    %meta{'http-equiv' => 'Content-Type', :content => 'text/html; charset=utf-8'}
+    %title Chayote Time Tracker
+    - bundle do
+      = stylesheet_link_tag :all, :cache => false
+      = javascript_include_tag :defaults, :cache => false
+  %body
+    #topbar
+      %span.floatr Hello Erick! (logout)
+      %span#logo Chayote
+    #mainbar
+      %ul#maintabs
+        %li= link_to "Reports", {:controller => "testlayout", :action => "index"}
+        %li= link_to "Invoices", {:controller => "testlayout", :action => "index"}
+    /=flash_helper
+    =yield
