@@ -1,4 +1,4 @@
-/* Top Defaults
+/* Defaults
 html, body, div, dl, dt, dd, ul, ol, li, h1, h2, h3, h4, h5, h6, pre, form, fieldset, input, textarea, p, blockquote, th, td
   :margin 0px
   :padding 0px
@@ -8,7 +8,15 @@ fieldset, img
 h1, h2, h3, h4, h5, h6
   :font-size 100%
   :font-weight 100%
-
+a
+  :color white
+  :text-decoration none
+  :border-bottom 1px solid #CCCCCC
+  / Remove outline that appears when you click on a link in FireFox
+  &:hover
+    :outline-color -moz-use-text-color
+    :outline-style none
+    :outline-width medium
 body
   :color #333
   :font
@@ -29,7 +37,6 @@ body
     :image none
     :position outside
     :type none
-  /:padding 7px 0 0 0
 
 /* Bars and tabs at top
 #topbar
@@ -38,20 +45,20 @@ body
   :padding-left 15px
   :padding-right 7px
   :background url(/images/headbar.gif) repeat-x
-  /:background-color #3D76C4
-  /:border-bottom 1px solid #366CB5
   :color #FFF
   #logo
     :font
       :size 17px
       :weight bold
+  a:hover
+    :color blue
+    :border-bottom 1px solid blue
 #mainbar
   :height 42px
   :padding-left 40px
   :background url(/images/subheadbar.gif) repeat-x
   #maintabs
     +ulnavmenu
-    /:padding-top 0px
     :font-size 13px
     :font-weight bold
     :line-height 0.9em
@@ -62,8 +69,8 @@ body
       :margin 0 8px 0 0
       :padding-left 8px
       a
+        :border 0 none
         :background transparent url(/images/default-tab-off-right-blue.png) no-repeat scroll right top
         :text-decoration none
-        :color #FFFFFF
         :display block
         :padding 12px 14px 24px 8px

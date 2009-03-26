@@ -4,3 +4,4 @@ tmp/*
 public/stylesheets/cache
 public/stylesheets/main.css
 *.DS_Store
+chayote.tmproj

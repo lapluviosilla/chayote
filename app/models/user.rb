@@ -67,9 +67,15 @@ class User < ActiveRecord::Base
   #
   def self.authenticate(login, password)
     return nil if login.blank? || password.blank?
-    #u = find_in_state :first, :active, :conditions => {:login => login.downcase} # need to get the salt
+    # Old code from AASM states. Keep for now.
+    # u = find_in_state :first, :active, :conditions => {:login => login.downcase} # need to get the salt
     u = find(:first, :conditions => {:login => login.downcase, :state => :active})
     u && u.authenticated?(password) ? u : nil
+  end
+  
+  def display_name
+    return login if name.blank?
+    name
   end
 
   def login=(value)

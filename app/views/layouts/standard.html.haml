@@ -9,7 +9,11 @@
       = javascript_include_tag :defaults, :cache => false
   %body
     #topbar
-      %span.floatr Hello Erick! (logout)
+      %span.floatr
+        -if logged_in?
+          == Hello #{current_user.display_name}! (#{link_to("logout", logout_path)})
+        - else
+          = link_to("Login", login_path)
       %span#logo Chayote
     #mainbar
       %ul#maintabs
