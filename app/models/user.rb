@@ -1,3 +1,24 @@
+# == Schema Information
+# Schema version: 20090324042916
+#
+# Table name: users
+#
+#  id                        :integer(4)      not null, primary key
+#  login                     :string(40)
+#  name                      :string(100)     default("")
+#  email                     :string(100)
+#  crypted_password          :string(40)
+#  salt                      :string(40)
+#  created_at                :datetime
+#  updated_at                :datetime
+#  remember_token            :string(40)
+#  remember_token_expires_at :datetime
+#  activation_code           :string(40)
+#  activated_at              :datetime
+#  state                     :string(18)      default("passive"), not null
+#  deleted_at                :datetime
+#
+
 require 'digest/sha1'
 
 class User < ActiveRecord::Base
@@ -18,7 +39,6 @@ class User < ActiveRecord::Base
   validates_length_of       :email,    :within => 6..100 #r@a.wk
   validates_uniqueness_of   :email
   validates_format_of       :email,    :with => Authentication.email_regex, :message => Authentication.bad_email_message
-
   
 
   # HACK HACK HACK -- how to do attr_accessible from here?
@@ -58,7 +78,11 @@ class User < ActiveRecord::Base
       transition :suspended => :pending, :if => !@activation_code.blank?
     end
   end
-
+  
+  def initialize
+    super()
+  end
+      
   # Authenticates a user by their login name and unencrypted password.  Returns the user or nil.
   #
   # uff.  this is really an authorization, not authentication routine.  
