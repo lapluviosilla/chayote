@@ -12,12 +12,62 @@ require 'state_machine/matcher_helpers'
 
 module StateMachine
   # Represents a state machine for a particular attribute.  State machines
-  # consist of states, events and a set of transitions that define how the state
-  # changes after a particular event is fired.
+  # consist of states, events and a set of transitions that define how the
+  # state changes after a particular event is fired.
   # 
-  # A state machine will not know all of the possible states for an object unless
-  # they are referenced *somewhere* in the state machine definition.  As a result,
-  # any unused states should be defined with the +other_states+ or +state+ helper.
+  # A state machine will not know all of the possible states for an object
+  # unless they are referenced *somewhere* in the state machine definition.
+  # As a result, any unused states should be defined with the +other_states+
+  # or +state+ helper.
+  # 
+  # == Actions
+  # 
+  # When an action is configured for a state machine, it is invoked when an
+  # object transitions via an event.  The success of the event becomes
+  # dependent on the success of the action.  If the action is successful, then
+  # the transitioned state remains persisted.  However, if the action fails
+  # (by returning false), the transitioned state will be rolled back.
+  # 
+  # For example,
+  # 
+  #   class Vehicle
+  #     attr_accessor :fail, :saving_state
+  #     
+  #     state_machine :initial => :parked, :action => :save do
+  #       event :ignite do
+  #         transition :parked => :idling
+  #       end
+  #       
+  #       event :park do
+  #         transition :idling => :parked
+  #       end
+  #     end
+  #     
+  #     def save
+  #       @saving_state = state
+  #       fail != true
+  #     end
+  #   end
+  #   
+  #   vehicle = Vehicle.new     # => #<Vehicle:0xb7c27024 @state="parked">
+  #   vehicle.save              # => true
+  #   vehicle.saving_state      # => "parked" # The state was "parked" was save was called
+  #   
+  #   # Successful event
+  #   vehicle.ignite            # => true
+  #   vehicle.saving_state      # => "idling" # The state was "idling" when save was called
+  #   vehicle.state             # => "idling"
+  #   
+  #   # Failed event
+  #   vehicle.fail = true
+  #   vehicle.park              # => false
+  #   vehicle.saving_state      # => "parked"
+  #   vehicle.state             # => "idling"
+  # 
+  # As shown, even though the state is set prior to calling the +save+ action
+  # on the object, it will be rolled back to the original state if the action
+  # fails.  *Note* that this will also be the case if an exception is raised
+  # while calling the action.
   # 
   # == Callbacks
   # 
@@ -34,7 +84,7 @@ module StateMachine
   # 
   # For example,
   # 
-  #   class Vehicle < ActiveRecord::Base
+  #   class Vehicle
   #     state_machine :initial => :parked do
   #       after_transition all => :parked do
   #         raise ArgumentError
@@ -114,7 +164,7 @@ module StateMachine
   #       logger.info "#{vehicle} instructed to #{transition.event}... #{transition.attribute} is: #{transition.from}, #{transition.attribute} will be: #{transition.to}"
   #     end
   #     
-  #     def self.after_transition(vehicle, transition, result)
+  #     def self.after_transition(vehicle, transition)
   #       logger.info "#{vehicle} instructed to #{transition.event}... #{transition.attribute} was: #{transition.from}, #{transition.attribute} is: #{transition.to}"
   #     end
   #   end
@@ -144,7 +194,7 @@ module StateMachine
   #   end
   # 
   # Additional observer-like behavior may be exposed by the various integrations
-  # available.  See below for more information.
+  # available.  See below for more information on integrations.
   # 
   # == Overriding instance / class methods
   # 
@@ -167,7 +217,7 @@ module StateMachine
   #   end
   # 
   # In the above example, the +park+ instance method that's generated on the
-  # Vehicle class (by the associated event) is overriden with custom behavior.
+  # Vehicle class (by the associated event) is overridden with custom behavior.
   # Once this behavior is complete, the original method from the state machine
   # is invoked by simply calling +super+.
   # 
@@ -197,10 +247,6 @@ module StateMachine
     include MatcherHelpers
     
     class << self
-      # The default message to use when invalidating objects that fail to
-      # transition when triggering an event
-      attr_accessor :default_invalid_message
-      
       # Attempts to find or create a state machine for the given class.  For
       # example,
       # 
@@ -226,7 +272,7 @@ module StateMachine
             machine.owner_class = owner_class
           end
           
-          # Evaluate DSL caller block
+          # Evaluate DSL
           machine.instance_eval(&block) if block_given?
         else
           # No existing machine: create a new one
@@ -268,8 +314,13 @@ module StateMachine
       end
     end
     
-    # Set defaults
-    self.default_invalid_message = 'cannot be transitioned via :%s from :%s'
+    # Default messages to use for validation errors in ORM integrations
+    class << self; attr_accessor :default_messages; end
+    @default_messages = {
+      :invalid => 'is invalid',
+      :invalid_event => 'cannot transition when %s',
+      :invalid_transition => 'cannot transition via "%s"'
+    }
     
     # The class that the machine is defined in
     attr_accessor :owner_class
@@ -277,8 +328,8 @@ module StateMachine
     # The attribute for which the machine is being defined
     attr_reader :attribute
     
-    # The events that trigger transitions.  These are sorted, by default, in the
-    # order in which they were defined.
+    # The events that trigger transitions.  These are sorted, by default, in
+    # the order in which they were defined.
     attr_reader :events
     
     # A list of all of the states known to this state machine.  This will pull
@@ -305,36 +356,41 @@ module StateMachine
     # depending on the context.
     attr_reader :namespace
     
+    # Whether the machine will use transactions when firing events
+    attr_reader :use_transactions
+    
     # Creates a new state machine for the given attribute
     def initialize(owner_class, *args, &block)
       options = args.last.is_a?(Hash) ? args.pop : {}
-      assert_valid_keys(options, :initial, :action, :plural, :namespace, :integration, :invalid_message)
-      
-      # Set machine configuration
-      @attribute = args.first || :state
-      @events = EventCollection.new
-      @states = StateCollection.new
-      @callbacks = {:before => [], :after => []}
-      @namespace = options[:namespace]
-      @invalid_message = options[:invalid_message]
-      
-      self.owner_class = owner_class
-      self.initial_state = options[:initial]
+      assert_valid_keys(options, :initial, :action, :plural, :namespace, :integration, :messages, :use_transactions)
       
       # Find an integration that matches this machine's owner class
       if integration = options[:integration] ? StateMachine::Integrations.find(options[:integration]) : StateMachine::Integrations.match(owner_class)
         extend integration
+        options = integration.defaults.merge(options) if integration.respond_to?(:defaults)
       end
       
-      # Set integration-specific configurations
-      @action = options.include?(:action) ? options[:action] : default_action
+      # Add machine-wide defaults
+      options = {:use_transactions => true}.merge(options)
+      
+      # Set machine configuration
+      @attribute = args.first || :state
+      @events = EventCollection.new(self)
+      @states = StateCollection.new(self)
+      @callbacks = {:before => [], :after => []}
+      @namespace = options[:namespace]
+      @messages = options[:messages] || {}
+      @action = options[:action]
+      @use_transactions = options[:use_transactions]
+      self.owner_class = owner_class
+      self.initial_state = options[:initial]
+      
+      # Define class integration
       define_helpers
       define_scopes(options[:plural])
-      
-      # Call after hook for integration-specific extensions
       after_initialize
       
-      # Evaluate DSL caller block
+      # Evaluate DSL
       instance_eval(&block) if block_given?
     end
     
@@ -392,10 +448,6 @@ module StateMachine
     # class.  If the method is already defined in the class, then this will not
     # override it.
     # 
-    # Not that in order for inheritance to work properly within state machines,
-    # any states/events/etc. must be referred to from the current state machine
-    # associated with the executing class.
-    # 
     # Example:
     # 
     #   attribute = machine.attribute
@@ -416,10 +468,6 @@ module StateMachine
     # Defines a new class method with the given name on the machine's owner
     # class.  If the method is already defined in the class, then this will not
     # override it.
-    # 
-    # Not that in order for inheritance to work properly within state machines,
-    # any states/events/etc. must be referred to from the current state machine
-    # associated with the executing class.
     # 
     # Example:
     # 
@@ -646,7 +694,6 @@ module StateMachine
     #   vehicle.rotate_driver     # => true
     #   vehicle.driver            # => "John"
     #   vehicle.passenger         # => "Jane"
-    #   vehicle.state             # => "parked"
     # 
     # As can be seen, both the +speed+ and +rotate_driver+ instance method
     # implementations changed how they behave based on what the current state
@@ -715,7 +762,7 @@ module StateMachine
     end
     alias_method :other_states, :state
     
-    # Gets the current value stored in the given object's state
+    # Gets the current value stored in the given object's state.
     # 
     # For example,
     # 
@@ -731,7 +778,7 @@ module StateMachine
       object.send(attribute)
     end
     
-    # Sets a new value in the given object's state
+    # Sets a new value in the given object's state.
     # 
     # For example,
     # 
@@ -1034,11 +1081,10 @@ module StateMachine
       add_callback(:after, options.is_a?(Hash) ? options : {:do => options}, &block)
     end
     
-    # Marks the given object as invalid after failing to transition via the
-    # given event.
+    # Marks the given object as invalid with the given message.
     # 
     # By default, this is a no-op.
-    def invalidate(object, event)
+    def invalidate(object, attribute, message, values = [])
     end
     
     # Resets an errors previously added when invalidating the given object
@@ -1053,7 +1099,11 @@ module StateMachine
     # default, this will not run any transactions, since the changes aren't
     # taking place within the context of a database.
     def within_transaction(object)
-      yield
+      if use_transactions
+        transaction(object) { yield }
+      else
+        yield
+      end
     end
     
     # Draws a directed graph of the machine for visualizing the various events,
@@ -1122,18 +1172,13 @@ module StateMachine
       def after_initialize
       end
       
-      # Gets the default action that should be invoked when performing a
-      # transition on the attribute for this machine.  This may change
-      # depending on the configured integration for the owner class.
-      def default_action
-      end
-      
       # Adds helper methods for interacting with the state machine, including
       # for states, events, and transitions
       def define_helpers
         define_state_accessor
         define_state_predicate
         define_event_helpers
+        define_action_helpers if action
         
         # Gets the state name for the current value
         define_instance_method("#{attribute}_name") do |machine, object|
@@ -1171,6 +1216,46 @@ module StateMachine
         define_instance_method("#{attribute}_transitions") do |machine, object, *args|
           machine.events.transitions_for(object, *args)
         end
+        
+        # Add helpers for interacting with the action
+        if action
+          attribute = self.attribute
+          
+          # Tracks the event / transition to invoke when the action is called
+          @instance_helper_module.class_eval do
+            attr_writer "#{attribute}_event"
+            attr_accessor "#{attribute}_event_transition"
+          end
+          
+          # Interpret non-blank events as present
+          define_instance_method("#{attribute}_event") do |machine, object|
+            event = object.instance_variable_get("@#{attribute}_event")
+            event && !(event.respond_to?(:empty?) && event.empty?) ? event.to_sym : nil
+          end
+        end
+      end
+      
+      # Adds helper methods for automatically firing events when an action
+      # is invoked
+      def define_action_helpers
+        action = self.action
+        
+        if owner_class.method_defined?(action) && !owner_class.state_machines.any? {|attribute, machine| machine.action == action && machine != self}
+          # Action is defined and hasn't already been overridden by another machine
+          @instance_helper_module.class_eval do
+            # Override the default action to invoke the before / after hooks
+            define_method(action) do |*args|
+              value = nil
+              result = self.class.state_machines.fire_attribute_events(self, action) { value = super(*args) }
+              value.nil? ? result : value
+            end
+          end
+          
+          true
+        else
+          # Action already defined: don't add integration-specific hooks
+          false
+        end
       end
       
       # Defines the with/without scope helpers for this attribute.  Both the
@@ -1189,10 +1274,7 @@ module StateMachine
               # Converts state names to their corresponding values so that they
               # can be looked up properly
               define_class_method(method) do |machine, klass, *states|
-                machine_states = machine.states
-                values = states.flatten.map {|state| machine_states.fetch(state).value}
-                
-                # Invoke the original scope implementation
+                values = states.flatten.map {|state| machine.states.fetch(state).value}
                 scope.call(klass, values)
               end
             end
@@ -1203,15 +1285,20 @@ module StateMachine
       # Creates a scope for finding objects *with* a particular value or values
       # for the attribute.
       # 
-      # This is only applicable to specific integrations.
+      # By default, this is a no-op.
       def create_with_scope(name)
       end
       
       # Creates a scope for finding objects *without* a particular value or
       # values for the attribute.
       # 
-      # This is only applicable to specific integrations.
+      # By default, this is a no-op.
       def create_without_scope(name)
+      end
+      
+      # Always yields
+      def transaction(object)
+        yield
       end
       
       # Adds a new transition callback of the given type.
@@ -1224,7 +1311,7 @@ module StateMachine
       # Tracks the given set of states in the list of all known states for
       # this machine
       def add_states(new_states)
-        new_states.collect do |new_state|
+        new_states.map do |new_state|
           unless state = states[new_state]
             states << state = State.new(self, new_state)
           end
@@ -1235,8 +1322,8 @@ module StateMachine
       
       # Generates the message to use when invalidating the given object after
       # failing to transition on a specific event
-      def invalid_message(object, event)
-        (@invalid_message || self.class.default_invalid_message) % [event.name, states.match(object).name]
+      def generate_message(name, values)
+        (@messages[name] || self.class.default_messages[name]) % values.map {|value| value.last}
       end
   end
 end

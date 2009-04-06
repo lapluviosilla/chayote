@@ -2,15 +2,16 @@ require File.expand_path(File.dirname(__FILE__) + '/../test_helper')
 
 class NodeCollectionByDefaultTest < Test::Unit::TestCase
   def setup
-    @collection = StateMachine::NodeCollection.new
+    @machine = StateMachine::Machine.new(Class.new)
+    @collection = StateMachine::NodeCollection.new(@machine)
   end
   
   def test_should_not_have_any_nodes
     assert_equal 0, @collection.length
   end
   
-  def test_should_not_have_a_machine
-    assert_nil @collection.machine
+  def test_should_have_a_machine
+    assert_equal @machine, @collection.machine
   end
   
   def test_should_index_by_name
@@ -21,11 +22,12 @@ end
 
 class NodeCollectionTest < Test::Unit::TestCase
   def setup
-    @collection = StateMachine::NodeCollection.new
+    @machine = StateMachine::Machine.new(Class.new)
+    @collection = StateMachine::NodeCollection.new(@machine)
   end
   
   def test_should_raise_exception_if_invalid_option_specified
-    exception = assert_raise(ArgumentError) { StateMachine::NodeCollection.new(:invalid => true) }
+    exception = assert_raise(ArgumentError) { StateMachine::NodeCollection.new(@machine, :invalid => true) }
     assert_equal 'Invalid key(s): invalid', exception.message
   end
   
@@ -42,7 +44,8 @@ end
 
 class NodeCollectionAfterBeingCopiedTest < Test::Unit::TestCase
   def setup
-    @collection = StateMachine::NodeCollection.new
+    machine = StateMachine::Machine.new(Class.new)
+    @collection = StateMachine::NodeCollection.new(machine)
     @collection << @parked = Struct.new(:name).new(:parked)
     
     @copied_collection = @collection.dup
@@ -66,7 +69,8 @@ end
 
 class NodeCollectionWithoutIndicesTest < Test::Unit::TestCase
   def setup
-    @collection = StateMachine::NodeCollection.new(:index => {})
+    machine = StateMachine::Machine.new(Class.new)
+    @collection = StateMachine::NodeCollection.new(machine, :index => {})
   end
   
   def test_should_allow_adding_node
@@ -94,7 +98,8 @@ end
 
 class NodeCollectionWithIndicesTest < Test::Unit::TestCase
   def setup
-    @collection = StateMachine::NodeCollection.new(:index => [:name, :value])
+    machine = StateMachine::Machine.new(Class.new)
+    @collection = StateMachine::NodeCollection.new(machine, :index => [:name, :value])
     
     @object = Struct.new(:name, :value).new(:parked, 1)
     @collection << @object
@@ -120,26 +125,25 @@ class NodeCollectionWithIndicesTest < Test::Unit::TestCase
   
   def test_should_use_first_index_by_default_on_fetch
     assert_equal @object, @collection.fetch(:parked)
-    exception = assert_raise(ArgumentError) { @collection.fetch(1) }
+    exception = assert_raise(IndexError) { @collection.fetch(1) }
     assert_equal '1 is an invalid name', exception.message
   end
   
   def test_should_allow_customizing_index_on_fetch
     assert_equal @object, @collection.fetch(1, :value)
-    exception = assert_raise(ArgumentError) { @collection.fetch(:parked, :value) }
+    exception = assert_raise(IndexError) { @collection.fetch(:parked, :value) }
     assert_equal ':parked is an invalid value', exception.message
   end
 end
 
 class NodeCollectionWithNodesTest < Test::Unit::TestCase
   def setup
-    @collection = StateMachine::NodeCollection.new
-    
-    @machine = StateMachine::Machine.new(Class.new)
+    machine = StateMachine::Machine.new(Class.new)
+    @collection = StateMachine::NodeCollection.new(machine)
     
     @klass = Struct.new(:name, :machine)
-    @parked = @klass.new(:parked, @machine)
-    @idling = @klass.new(:idling, @machine)
+    @parked = @klass.new(:parked, machine)
+    @idling = @klass.new(:idling, machine)
     
     @collection << @parked
     @collection << @idling
@@ -157,14 +161,20 @@ class NodeCollectionWithNodesTest < Test::Unit::TestCase
     assert_equal @idling, @collection.at(1)
   end
   
-  def test_should_have_a_machine
-    assert_equal @machine, @collection.machine
+  def test_should_deep_copy_machine_changes
+    new_machine = StateMachine::Machine.new(Class.new)
+    @collection.machine = new_machine
+    
+    assert_equal new_machine, @collection.machine
+    assert_equal new_machine, @parked.machine
+    assert_equal new_machine, @idling.machine
   end
 end
 
 class NodeCollectionAfterUpdateTest < Test::Unit::TestCase
   def setup
-    @collection = StateMachine::NodeCollection.new(:index => [:name, :value])
+    machine = StateMachine::Machine.new(Class.new)
+    @collection = StateMachine::NodeCollection.new(machine, :index => [:name, :value])
     
     @klass = Struct.new(:name, :value)
     @parked = @klass.new(:parked, 1)
@@ -193,22 +203,5 @@ class NodeCollectionAfterUpdateTest < Test::Unit::TestCase
   def test_should_remove_each_old_indexed_key
     assert_nil @collection[:parked]
     assert_nil @collection[1, :value]
-  end
-end
-
-class NodeCollectionChangingMachineTest < Test::Unit::TestCase
-  def setup
-    @collection = StateMachine::NodeCollection.new
-    
-    @klass = Struct.new(:name, :machine)
-    @collection << @parked = @klass.new(:parked)
-    @collection << @idling = @klass.new(:idling)
-    
-    @collection.machine = :machine
-  end
-  
-  def test_should_update_each_node_machine
-    assert_equal :machine, @parked.machine
-    assert_equal :machine, @idling.machine
   end
 end

@@ -3,7 +3,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../test_helper')
 class CallbackTest < Test::Unit::TestCase
   def test_should_raise_exception_if_do_option_not_specified
     exception = assert_raise(ArgumentError) { StateMachine::Callback.new }
-    assert_match ':do callback must be specified', exception.message
+    assert_equal ':do callback must be specified', exception.message
   end
   
   def test_should_not_raise_exception_if_do_option_specified
@@ -16,6 +16,10 @@ class CallbackTest < Test::Unit::TestCase
   
   def test_should_not_bind_to_objects
     assert !StateMachine::Callback.bind_to_object
+  end
+  
+  def test_should_not_have_a_terminator
+    assert_nil StateMachine::Callback.terminator
   end
 end
 
@@ -234,5 +238,46 @@ class CallbackWithBoundObjectTest < Test::Unit::TestCase
   def test_should_ignore_option_for_string_callbacks
     @callback = StateMachine::Callback.new(:do => '[1, 2, 3]', :bind_to_object => true)
     assert_equal [1, 2, 3], @callback.call(@object)
+  end
+end
+
+class CallbackWithApplicationBoundObjectTest < Test::Unit::TestCase
+  def setup
+    @original_bind_to_object = StateMachine::Callback.bind_to_object
+    StateMachine::Callback.bind_to_object = true
+    
+    @object = Object.new
+    @callback = StateMachine::Callback.new(:do => lambda {|*args| self})
+  end
+  
+  def test_should_call_method_within_the_context_of_the_object
+    assert_equal @object, @callback.call(@object)
+  end
+  
+  def teardown
+    StateMachine::Callback.bind_to_object = @original_bind_to_object
+  end
+end
+
+class CallbackWithApplicationTerminatorTest < Test::Unit::TestCase
+  def setup
+    @original_terminator = StateMachine::Callback.bind_to_object
+    StateMachine::Callback.terminator = lambda {|result| result == false}
+    
+    @object = Object.new
+  end
+  
+  def test_should_not_halt_if_terminator_does_not_match
+    callback = StateMachine::Callback.new(:do => lambda {true})
+    assert_nothing_thrown { callback.call(@object) }
+  end
+  
+  def test_should_halt_if_terminator_matches
+    callback = StateMachine::Callback.new(:do => lambda {false})
+    assert_throws(:halt) { callback.call(@object) }
+  end
+  
+  def teardown
+    StateMachine::Callback.bind_to_object = @original_bind_to_object
   end
 end

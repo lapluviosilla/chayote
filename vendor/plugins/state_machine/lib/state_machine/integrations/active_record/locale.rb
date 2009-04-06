@@ -2,7 +2,8 @@
   :activerecord => {
     :errors => {
       :messages => {
-        :invalid_transition => StateMachine::Machine.default_invalid_message % ['{{event}}', '{{value}}']
+        :invalid_event => StateMachine::Machine.default_messages[:invalid_event] % ['{{state}}'],
+        :invalid_transition => StateMachine::Machine.default_messages[:invalid_transition] % ['{{event}}']
       }
     }
   }

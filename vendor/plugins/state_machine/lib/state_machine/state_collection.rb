@@ -3,13 +3,13 @@ require 'state_machine/node_collection'
 module StateMachine
   # Represents a collection of states in a state machine
   class StateCollection < NodeCollection
-    def initialize #:nodoc:
-      super(:index => [:name, :value])
+    def initialize(machine) #:nodoc:
+      super(machine, :index => [:name, :value])
     end
     
     # Determines whether the given object is in a specific state.  If the
     # object's current value doesn't match the state, then this will return
-    # false, otherwise true.  If the given state is unknown, then an ArgumentError
+    # false, otherwise true.  If the given state is unknown, then an IndexError
     # will be raised.
     # 
     # == Examples
@@ -25,7 +25,7 @@ module StateMachine
     #   
     #   states.matches?(vehicle, :parked)   # => true
     #   states.matches?(vehicle, :idling)   # => false
-    #   states.matches?(vehicle, :invalid)  # => ArgumentError: :invalid is an invalid key for :name index
+    #   states.matches?(vehicle, :invalid)  # => IndexError: :invalid is an invalid key for :name index
     def matches?(object, name)
       fetch(name).matches?(machine.read(object))
     end
@@ -54,8 +54,6 @@ module StateMachine
     #   vehicle.state = 'invalid'
     #   states.match(vehicle)         # => ArgumentError: "invalid" is not a known state value
     def match(object)
-      raise ArgumentError, 'No states available to match' unless machine = self.machine
-      
       value = machine.read(object)
       state = self[value, :value] || detect {|state| state.matches?(value)}
       raise ArgumentError, "#{value.inspect} is not a known #{machine.attribute} value" unless state
@@ -74,8 +72,6 @@ module StateMachine
     # 
     # This order will determine how the GraphViz visualizations are rendered.
     def by_priority
-      return [] unless machine = self.machine
-      
       order = select {|state| state.initial}.map {|state| state.name}
       
       machine.events.each {|event| order += event.known_states}

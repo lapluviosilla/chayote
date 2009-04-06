@@ -39,6 +39,10 @@ class MachineByDefaultTest < Test::Unit::TestCase
     assert_nil @machine.action
   end
   
+  def test_should_use_tranactions
+    assert_equal true, @machine.use_transactions
+  end
+  
   def test_should_not_have_a_namespace
     assert_nil @machine.namespace
   end
@@ -85,6 +89,22 @@ class MachineByDefaultTest < Test::Unit::TestCase
   
   def test_should_define_a_transition_reader_for_the_attribute
     assert @object.respond_to?(:state_transitions)
+  end
+  
+  def test_should_not_define_an_event_attribute_reader
+    assert !@object.respond_to?(:state_event)
+  end
+  
+  def test_should_not_define_an_event_attribute_writer
+    assert !@object.respond_to?(:state_event=)
+  end
+  
+  def test_should_not_define_an_event_transition_attribute_reader
+    assert !@object.respond_to?(:state_event_transition)
+  end
+  
+  def test_should_not_define_an_event_transition_attribute_writer
+    assert !@object.respond_to?(:state_event_transition=)
   end
   
   def test_should_not_define_singular_with_scope
@@ -234,9 +254,8 @@ end
 class MachineWithNilActionTest < Test::Unit::TestCase
   def setup
     integration = Module.new do
-      def default_action
-        :save
-      end
+      class << self; attr_reader :defaults; end
+      @defaults = {:action => :save}
     end
     StateMachine::Integrations.const_set('Custom', integration)
     @machine = StateMachine::Machine.new(Class.new, :action => nil, :integration => :custom)
@@ -268,7 +287,7 @@ class MachineWithoutIntegrationTest < Test::Unit::TestCase
   end
   
   def test_invalidation_should_do_nothing
-    assert_nil @machine.invalidate(@object, StateMachine::Event.new(@machine, :park))
+    assert_nil @machine.invalidate(@object, :state, :invalid_transition, [[:event, :park]])
   end
   
   def test_reset_should_do_nothing
@@ -293,37 +312,37 @@ end
 
 class MachineWithIntegrationTest < Test::Unit::TestCase
   def setup
-    @integration = Module.new do
-      class << self; attr_accessor :initialized, :with_scopes, :without_scopes; end
-      @initialized = false
-      @with_scopes = []
-      @without_scopes = []
+    StateMachine::Integrations.const_set('Custom', Module.new do  
+      class << self; attr_reader :defaults; end
+      @defaults = {:action => :save, :use_transactions => false}
+          
+      attr_reader :initialized, :with_scopes, :without_scopes, :ran_transaction
       
       def after_initialize
-        StateMachine::Integrations::Custom.initialized = true
-      end
-      
-      def default_action
-        :save
+        @initialized = true
       end
       
       def create_with_scope(name)
-        StateMachine::Integrations::Custom.with_scopes << name
+        (@with_scopes ||= []) << name
         lambda {}
       end
       
       def create_without_scope(name)
-        StateMachine::Integrations::Custom.without_scopes << name
+        (@without_scopes ||= []) << name
         lambda {}
       end
-    end
+      
+      def transaction(object)
+        @ran_transaction = true
+        yield
+      end
+    end)
     
-    StateMachine::Integrations.const_set('Custom', @integration)
     @machine = StateMachine::Machine.new(Class.new, :integration => :custom)
   end
   
   def test_should_call_after_initialize_hook
-    assert @integration.initialized
+    assert @machine.initialized
   end
   
   def test_should_use_the_default_action
@@ -335,16 +354,81 @@ class MachineWithIntegrationTest < Test::Unit::TestCase
     assert_equal :save!, machine.action
   end
   
+  def test_should_use_the_default_use_transactions
+    assert_equal false, @machine.use_transactions
+  end
+  
+  def test_should_use_the_custom_use_transactions_if_specified
+    machine = StateMachine::Machine.new(Class.new, :integration => :custom, :use_transactions => true)
+    assert_equal true, machine.use_transactions
+  end
+  
   def test_should_define_a_singular_and_plural_with_scope
-    assert_equal %w(with_state with_states), @integration.with_scopes
+    assert_equal %w(with_state with_states), @machine.with_scopes
   end
   
   def test_should_define_a_singular_and_plural_without_scope
-    assert_equal %w(without_state without_states), @integration.without_scopes
+    assert_equal %w(without_state without_states), @machine.without_scopes
   end
   
   def teardown
     StateMachine::Integrations.send(:remove_const, 'Custom')
+  end
+end
+
+class MachineWithActionTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new do
+      def save
+      end
+    end
+    
+    @machine = StateMachine::Machine.new(@klass, :action => :save)
+    @object = @klass.new
+  end
+  
+  def test_should_define_an_event_attribute_reader
+    assert @object.respond_to?(:state_event)
+  end
+  
+  def test_should_define_an_event_attribute_writer
+    assert @object.respond_to?(:state_event=)
+  end
+  
+  def test_should_define_an_event_transition_attribute_reader
+    assert @object.respond_to?(:state_event_transition)
+  end
+  
+  def test_should_define_an_event_transition_attribute_writer
+    assert @object.respond_to?(:state_event_transition=)
+  end
+end
+
+class MachineWithActionUndefinedTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
+    @machine = StateMachine::Machine.new(@klass, :action => :save)
+    @object = @klass.new
+  end
+  
+  def test_should_define_an_event_attribute_reader
+    assert @object.respond_to?(:state_event)
+  end
+  
+  def test_should_define_an_event_attribute_writer
+    assert @object.respond_to?(:state_event=)
+  end
+  
+  def test_should_define_an_event_transition_attribute_reader
+    assert @object.respond_to?(:state_event_transition)
+  end
+  
+  def test_should_define_an_event_transition_attribute_writer
+    assert @object.respond_to?(:state_event_transition=)
+  end
+  
+  def test_should_not_define_action
+    assert !@object.respond_to?(:save)
   end
 end
 
@@ -386,8 +470,8 @@ end
 class MachineWithCustomInvalidationTest < Test::Unit::TestCase
   def setup
     @integration = Module.new do
-      def invalidate(object, event)
-        object.error = invalid_message(object, event)
+      def invalidate(object, attribute, message, values = [])
+        object.error = generate_message(message, values)
       end
     end
     StateMachine::Integrations.const_set('Custom', @integration)
@@ -396,7 +480,7 @@ class MachineWithCustomInvalidationTest < Test::Unit::TestCase
       attr_accessor :error
     end
     
-    @machine = StateMachine::Machine.new(@klass, :integration => :custom, :invalid_message => 'cannot %s when %s')
+    @machine = StateMachine::Machine.new(@klass, :integration => :custom, :messages => {:invalid_transition => 'cannot %s'})
     @machine.state :parked
     
     @object = @klass.new
@@ -404,8 +488,8 @@ class MachineWithCustomInvalidationTest < Test::Unit::TestCase
   end
   
   def test_use_custom_message
-    @machine.invalidate(@object, StateMachine::Event.new(@machine, :park))
-    assert_equal 'cannot park when parked', @object.error
+    @machine.invalidate(@object, :state, :invalid_transition, [[:event, :park]])
+    assert_equal 'cannot park', @object.error
   end
   
   def teardown
@@ -418,8 +502,8 @@ class MachineTest < Test::Unit::TestCase
     assert_raise(ArgumentError) {StateMachine::Machine.new(Class.new, :invalid => true)}
   end
   
-  def test_should_not_raise_exception_if_custom_invalid_message_specified
-    assert_nothing_raised {StateMachine::Machine.new(Class.new, :invalid_message => 'custom')}
+  def test_should_not_raise_exception_if_custom_messages_specified
+    assert_nothing_raised {StateMachine::Machine.new(Class.new, :messages => {:invalid_transition => 'custom'})}
   end
   
   def test_should_evaluate_a_block_during_initialization

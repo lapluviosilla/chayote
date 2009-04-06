@@ -1,5 +1,27 @@
 == master
 
+== 0.7.1 / 2009-04-05
+
+* Fix machines failing to generate graphs when run from Merb tasks
+
+== 0.7.0 / 2009-04-04
+
+* Add #{attribute}_event for automatically firing events when the object's action is called
+* Make it easier to override state-driven behaviors
+* Rollback state changes when the action fails during transitions
+* Use :messages instead of :invalid_message for customizing validation errors
+* Use more human-readable validation errors
+* Add support for more ActiveRecord observer hooks
+* Add support for targeting multiple specific state machines in DataMapper observer hooks
+* Don't pass the result of the action as an argument to callbacks (access via Transition#result)
+* Fix incorrect results being used when running transitions in parallel
+* Fix transition args not being set when run in parallel
+* Allow callback terminators to be set on an application-wide basis
+* Only catch :halt during before / after transition callbacks
+* Fix ActiveRecord predicates being overwritten if they're already defined in the class
+* Allow machine options to be set on an integration-wide basis
+* Turn transactions off by default in DataMapper integrations
+* Add support for configuring the use of transactions
 * Simplify reading/writing of attributes
 * Simplify access to state machines via #state_machine(:attribute) without generating dupes
 * Fix assumptions that dm-validations is always available in DataMapper integration
@@ -12,7 +34,7 @@
 * Use generated non-bang event when running bang version so that overriding one affects the other
 * Provide access to arguments passed into an event from transition callbacks via Transition#args
 
-== 0.6.3 / 2008-03-10
+== 0.6.3 / 2009-03-10
 
 * Add support for customizing the graph's orientation
 * Use the standard visualizations for initial (open arrow) and final (double circle) states

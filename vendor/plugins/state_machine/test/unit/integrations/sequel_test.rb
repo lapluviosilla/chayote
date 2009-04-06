@@ -25,6 +25,7 @@ begin
           end if auto_migrate
           model = Class.new(Sequel::Model(:foo)) do
             self.raise_on_save_failure = false
+            plugin :validation_class_methods if respond_to?(:plugin)
             
             def self.name; 'SequelTest::Foo'; end
           end
@@ -51,6 +52,10 @@ begin
       
       def test_should_use_save_as_action
         assert_equal :save, @machine.action
+      end
+      
+      def test_should_use_transactions
+        assert_equal true, @machine.use_transactions
       end
     end
     
@@ -135,9 +140,9 @@ begin
         record = @model.new
         record.state = 'parked'
         
-        @machine.invalidate(record, StateMachine::Event.new(@machine, :park))
+        @machine.invalidate(record, :state, :invalid_transition, [[:event, :park]])
         
-        assert_equal ['cannot be transitioned via :park from :parked'], record.errors.on(:state)
+        assert_equal ['cannot transition via "park"'], record.errors.on(:state)
       end
       
       def test_should_clear_errors_on_reset
@@ -257,7 +262,7 @@ begin
         assert called
       end
       
-      def test_should_pass_transition_into_before_callbacks_with_one_argument
+      def test_should_pass_transition_to_before_callbacks_with_one_argument
         transition = nil
         @machine.before_transition(lambda {|arg| transition = arg})
         
@@ -265,7 +270,7 @@ begin
         assert_equal @transition, transition
       end
       
-      def test_should_pass_transition_into_before_callbacks_with_multiple_arguments
+      def test_should_pass_transition_to_before_callbacks_with_multiple_arguments
         callback_args = nil
         @machine.before_transition(lambda {|*args| callback_args = args})
         
@@ -289,12 +294,12 @@ begin
         assert called
       end
       
-      def test_should_pass_transition_and_result_into_after_callbacks_with_multiple_arguments
+      def test_should_pass_transition_to_after_callbacks_with_multiple_arguments
         callback_args = nil
         @machine.after_transition(lambda {|*args| callback_args = args})
         
         @transition.perform
-        assert_equal [@transition, true], callback_args
+        assert_equal [@transition], callback_args
       end
       
       def test_should_run_after_callbacks_with_the_context_of_the_record
@@ -357,6 +362,57 @@ begin
       def test_should_be_valid_if_validation_succeeds_within_state_scope
         record = @model.new(:state => 'first_gear', :seatbelt => true)
         assert record.valid?
+      end
+    end
+    
+    class MachineWithEventAttributesOnValidationTest < BaseTestCase
+      def setup
+        @model = new_model
+        @machine = StateMachine::Machine.new(@model)
+        @machine.event :ignite do
+          transition :parked => :idling
+        end
+        
+        @record = @model.new
+        @record.state = 'parked'
+        @record.state_event = 'ignite'
+      end
+      
+      def test_should_fail_if_event_is_invalid
+        @record.state_event = 'invalid'
+        assert !@record.valid?
+        assert_equal ['state_event is invalid'], @record.errors.full_messages
+      end
+      
+      def test_should_fail_if_event_has_no_transition
+        @record.state = 'idling'
+        assert !@record.valid?
+        assert_equal ['state_event cannot transition when idling'], @record.errors.full_messages
+      end
+      
+      def test_should_be_successful_if_event_has_transition
+        assert @record.valid?
+      end
+      
+      def test_should_run_before_callbacks
+        ran_callback = false
+        @machine.before_transition { ran_callback = true }
+        
+        @record.valid?
+        assert ran_callback
+      end
+      
+      def test_should_persist_new_state
+        @record.valid?
+        assert_equal 'idling', @record.state
+      end
+      
+      def test_should_not_run_after_callbacks
+        ran_callback = false
+        @machine.after_transition { ran_callback = true }
+        
+        @record.valid?
+        assert !ran_callback
       end
     end
   end

@@ -66,12 +66,61 @@ class TransitionTest < Test::Unit::TestCase
     assert_equal expected, @transition.attributes
   end
   
-  def test_should_not_have_any_args
-    assert_nil @transition.args
+  def test_should_have_empty_args
+    assert_equal [], @transition.args
+  end
+  
+  def test_should_not_have_a_result
+    assert_nil @transition.result
   end
   
   def test_should_use_pretty_inspect
     assert_equal '#<StateMachine::Transition attribute=:state event=:ignite from="parked" from_name=:parked to="idling" to_name=:idling>', @transition.inspect
+  end
+end
+
+class TransitionWithoutEventTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
+    @machine = StateMachine::Machine.new(@klass)
+    @machine.state :parked, :idling
+    
+    @object = @klass.new
+    @object.state = 'parked'
+    
+    @transition = StateMachine::Transition.new(@object, @machine, nil, :parked, :idling)
+  end
+  
+  def test_should_not_have_an_event
+    assert_nil @transition.event
+  end
+  
+  def test_should_not_have_a_qualified_event
+    assert_nil @transition.qualified_event
+  end
+end
+
+class TransitionWithInvalidNodesTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
+    @machine = StateMachine::Machine.new(@klass)
+    @machine.state :parked, :idling
+    @machine.event :ignite
+    
+    @object = @klass.new
+    @object.state = 'parked'
+  end
+  
+  def test_should_raise_exception_with_invalid_event
+    assert_raise(IndexError) { StateMachine::Transition.new(@object, @machine, :invalid, :parked, :idling) }
+  end
+  
+  def test_should_raise_exception_with_invalid_from_state
+    assert_raise(IndexError) { StateMachine::Transition.new(@object, @machine, :ignite, :invalid, :idling) }
+  end
+  
+  def test_should_raise_exception_with_invalid_to_state
+    assert_raise(IndexError) { StateMachine::Transition.new(@object, @machine, :ignite, :parked, :invalid) }
   end
 end
 
@@ -90,6 +139,40 @@ class TransitionWithDynamicToValueTest < Test::Unit::TestCase
   
   def test_should_evaluate_to_value
     assert_equal 1, @transition.to
+  end
+end
+
+class TransitionLoopbackTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
+    @machine = StateMachine::Machine.new(@klass)
+    @machine.state :parked
+    @machine.event :park
+    
+    @object = @klass.new
+    @object.state = 'parked'
+    @transition = StateMachine::Transition.new(@object, @machine, :park, :parked, :parked)
+  end
+  
+  def test_should_be_loopback
+    assert @transition.loopback?
+  end
+end
+
+class TransitionWithDifferentStatesTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
+    @machine = StateMachine::Machine.new(@klass)
+    @machine.state :parked, :idling
+    @machine.event :ignite
+    
+    @object = @klass.new
+    @object.state = 'parked'
+    @transition = StateMachine::Transition.new(@object, @machine, :ignite, :parked, :idling)
+  end
+  
+  def test_should_not_be_loopback
+    assert !@transition.loopback?
   end
 end
 
@@ -151,6 +234,10 @@ class TransitionWithActionTest < Test::Unit::TestCase
   def test_should_have_an_action
     assert_equal :save, @transition.action
   end
+  
+  def test_should_not_have_a_result
+    assert_nil @transition.result
+  end
 end
 
 class TransitionAfterBeingPersistedTest < Test::Unit::TestCase
@@ -168,6 +255,53 @@ class TransitionAfterBeingPersistedTest < Test::Unit::TestCase
   end
   
   def test_should_update_state_value
+    assert_equal 'idling', @object.state
+  end
+  
+  def test_should_not_change_from_state
+    assert_equal 'parked', @transition.from
+  end
+  
+  def test_should_not_change_to_state
+    assert_equal 'idling', @transition.to
+  end
+  
+  def test_should_revert_to_from_state_on_rollback
+    @transition.rollback
+    assert_equal 'parked', @object.state
+  end
+end
+
+class TransitionAfterBeingRolledBackTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
+    @machine = StateMachine::Machine.new(@klass, :action => :save)
+    @machine.state :parked, :idling
+    @machine.event :ignite
+    
+    @object = @klass.new
+    @object.state = 'parked'
+    
+    @transition = StateMachine::Transition.new(@object, @machine, :ignite, :parked, :idling)
+    @object.state = 'idling'
+    
+    @transition.rollback
+  end
+  
+  def test_should_update_state_value_to_from_state
+    assert_equal 'parked', @object.state
+  end
+  
+  def test_should_not_change_from_state
+    assert_equal 'parked', @transition.from
+  end
+  
+  def test_should_not_change_to_state
+    assert_equal 'idling', @transition.to
+  end
+  
+  def test_should_still_be_able_to_persist
+    @transition.persist
     assert_equal 'idling', @object.state
   end
 end
@@ -194,8 +328,9 @@ class TransitionWithCallbacksTest < Test::Unit::TestCase
   
   def test_should_run_before_callbacks_on_before
     @machine.before_transition(lambda {|object| @run = true})
-    @transition.before
+    result = @transition.before
     
+    assert_equal true, result
     assert_equal true, @run
   end
   
@@ -228,10 +363,12 @@ class TransitionWithCallbacksTest < Test::Unit::TestCase
     assert_equal [@object, @transition], @args
   end
   
-  def test_should_not_catch_halted_before_callbacks
+  def test_should_catch_halted_before_callbacks
     @machine.before_transition(lambda {throw :halt})
     
-    assert_throws(:halt) { @transition.before }
+    result = nil
+    assert_nothing_thrown { result = @transition.before }
+    assert_equal false, result
   end
   
   def test_should_run_before_callbacks_on_perform_before_changing_the_state
@@ -243,9 +380,18 @@ class TransitionWithCallbacksTest < Test::Unit::TestCase
   
   def test_should_run_after_callbacks_on_after
     @machine.after_transition(lambda {|object| @run = true})
-    @transition.after(true)
+    result = @transition.after(true)
     
+    assert_equal true, result
     assert_equal true, @run
+  end
+  
+  def test_should_set_result_on_after
+    @transition.after
+    assert_nil @transition.result
+    
+    @transition.after(1)
+    assert_equal 1, @transition.result
   end
   
   def test_should_run_after_callbacks_in_the_order_they_were_defined
@@ -270,20 +416,24 @@ class TransitionWithCallbacksTest < Test::Unit::TestCase
     assert_equal 1, @count
   end
   
-  def test_should_pass_transition_and_action_result_to_after_callbacks
+  def test_should_pass_transition_to_after_callbacks
     @machine.after_transition(lambda {|*args| @args = args})
     
     @transition.after(true)
-    assert_equal [@object, @transition, true], @args
+    assert_equal [@object, @transition], @args
+    assert_equal true, @transition.result
     
     @transition.after(false)
-    assert_equal [@object, @transition, false], @args
+    assert_equal [@object, @transition], @args
+    assert_equal false, @transition.result
   end
   
   def test_should_catch_halted_after_callbacks
     @machine.after_transition(lambda {throw :halt})
     
-    assert_nothing_thrown { @transition.after(true) }
+    result = nil
+    assert_nothing_thrown { result = @transition.after(true) }
+    assert_equal true, result
   end
   
   def test_should_run_after_callbacks_on_perform_after_running_the_action
@@ -319,6 +469,10 @@ class TransitionAfterBeingPerformedTest < Test::Unit::TestCase
     assert_equal [], @transition.args
   end
   
+  def test_should_have_a_result
+    assert_equal true, @transition.result
+  end
+  
   def test_should_be_successful
     assert_equal true, @result
   end
@@ -333,43 +487,6 @@ class TransitionAfterBeingPerformedTest < Test::Unit::TestCase
   
   def test_should_run_the_action_after_saving_the_state
     assert_equal 'idling', @object.save_state
-  end
-end
-
-class TransitionWithoutRunningActionTest < Test::Unit::TestCase
-  def setup
-    @klass = Class.new do
-      attr_reader :saved
-      
-      def save
-        @saved = true
-      end
-    end
-    
-    @machine = StateMachine::Machine.new(@klass, :action => :save)
-    @machine.state :parked, :idling
-    @machine.event :ignite
-    
-    @object = @klass.new
-    @object.state = 'parked'
-    @transition = StateMachine::Transition.new(@object, @machine, :ignite, :parked, :idling)
-    @result = @transition.perform(false)
-  end
-  
-  def test_should_have_empty_args
-    assert_equal [], @transition.args
-  end
-  
-  def test_should_be_successful
-    assert_equal true, @result
-  end
-  
-  def test_should_change_the_current_state
-    assert_equal 'idling', @object.state
-  end
-  
-  def test_should_not_run_the_action
-    assert !@object.saved
   end
 end
 
@@ -403,6 +520,47 @@ class TransitionWithPerformArgumentsTest < Test::Unit::TestCase
     @transition.perform(1, 2, false)
     
     assert_equal [1, 2], @transition.args
+    assert !@object.saved
+  end
+end
+
+class TransitionWithoutRunningActionTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new do
+      attr_reader :saved
+      
+      def save
+        @saved = true
+      end
+    end
+    
+    @machine = StateMachine::Machine.new(@klass, :action => :save)
+    @machine.state :parked, :idling
+    @machine.event :ignite
+    
+    @object = @klass.new
+    @object.state = 'parked'
+    @transition = StateMachine::Transition.new(@object, @machine, :ignite, :parked, :idling)
+    @result = @transition.perform(false)
+  end
+  
+  def test_should_have_empty_args
+    assert_equal [], @transition.args
+  end
+  
+  def test_should_not_have_a_result
+    assert_nil @transition.result
+  end
+  
+  def test_should_be_successful
+    assert_equal true, @result
+  end
+  
+  def test_should_change_the_current_state
+    assert_equal 'idling', @object.state
+  end
+  
+  def test_should_not_run_the_action
     assert !@object.saved
   end
 end
@@ -525,58 +683,6 @@ class TransitionHaltedDuringBeforeCallbacksTest < Test::Unit::TestCase
   end
 end
 
-class TransitionHaltedDuringActionTest < Test::Unit::TestCase
-  def setup
-    @klass = Class.new do
-      class << self; attr_accessor :cancelled_transaction; end
-      attr_reader :saved
-      
-      def save
-        throw :halt
-      end
-    end
-    @before_count = 0
-    @after_count = 0
-    
-    @machine = StateMachine::Machine.new(@klass, :action => :save)
-    @machine.state :parked, :idling
-    @machine.event :ignite
-    class << @machine
-      def within_transaction(object)
-        owner_class.cancelled_transaction = yield == false
-      end
-    end
-    
-    @machine.before_transition lambda {@before_count += 1}
-    @machine.after_transition lambda {@after_count += 1}
-    
-    @object = @klass.new
-    @object.state = 'parked'
-    @transition = StateMachine::Transition.new(@object, @machine, :ignite, :parked, :idling)
-    @result = @transition.perform
-  end
-  
-  def test_should_not_be_successful
-    assert !@result
-  end
-  
-  def test_should_change_current_state
-    assert_equal 'idling', @object.state
-  end
-  
-  def test_should_run_before_callbacks
-    assert_equal 1, @before_count
-  end
-  
-  def test_should_not_run_after_callbacks
-    assert_equal 0, @after_count
-  end
-  
-  def test_should_cancel_the_transaction
-    assert @klass.cancelled_transaction
-  end
-end
-
 class TransitionHaltedAfterCallbackTest < Test::Unit::TestCase
   def setup
     @klass = Class.new do
@@ -630,7 +736,7 @@ class TransitionHaltedAfterCallbackTest < Test::Unit::TestCase
   end
 end
 
-class TransitionWithFailedActionTest < Test::Unit::TestCase
+class TransitionWithActionFailedTest < Test::Unit::TestCase
   def setup
     @klass = Class.new do
       class << self; attr_accessor :cancelled_transaction; end
@@ -664,8 +770,8 @@ class TransitionWithFailedActionTest < Test::Unit::TestCase
     assert !@result
   end
   
-  def test_should_change_current_state
-    assert_equal 'idling', @object.state
+  def test_should_not_change_current_state
+    assert_nil @object.state
   end
   
   def test_should_run_before_callbacks
@@ -681,17 +787,48 @@ class TransitionWithFailedActionTest < Test::Unit::TestCase
   end
 end
 
+class TransitionWithActionErrorTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new do
+      def save
+        raise ArgumentError
+      end
+    end
+    
+    @machine = StateMachine::Machine.new(@klass, :action => :save)
+    @machine.state :parked, :idling
+    @machine.event :ignite
+    
+    @object = @klass.new
+    @object.state = 'parked'
+    @transition = StateMachine::Transition.new(@object, @machine, :ignite, :parked, :idling)
+    
+    @raised = true
+    begin
+      @transition.perform
+      @raised = false
+    rescue ArgumentError
+    end
+  end
+  
+  def test_should_not_catch_exception
+    assert @raised
+  end
+  
+  def test_should_not_change_current_state
+    assert_equal 'parked', @object.state
+  end
+end
+
 class TransitionsInParallelTest < Test::Unit::TestCase
   def setup
     @klass = Class.new do
-      attr_reader :actions
       attr_reader :persisted
       
       def initialize
+        @persisted = []
         @state = 'parked'
         @status = 'first_gear'
-        @actions = []
-        @persisted = []
         super
       end
       
@@ -704,26 +841,64 @@ class TransitionsInParallelTest < Test::Unit::TestCase
         @persisted << value
         @status = value
       end
-      
-      def save_state
-        @actions << :save_state
-      end
-      
-      def save_status
-        @actions << :save_status
-      end
     end
+    
+    @state = StateMachine::Machine.new(@klass, :state)
+    @state.event :ignite
+    @state.state :parked, :idling
+    
+    @status = StateMachine::Machine.new(@klass, :status)
+    @status.event :shift_up
+    @status.state :first_gear, :second_gear
+    
+    @object = @klass.new
+    @state_transition = StateMachine::Transition.new(@object, @state, :ignite, :parked, :idling)
+    @status_transition = StateMachine::Transition.new(@object, @status, :shift_up, :first_gear, :second_gear)
+    
+    @result = StateMachine::Transition.perform([@state_transition, @status_transition])
+  end
+  
+  def test_should_raise_exception_if_attempted_on_the_same_state_machine
+    exception = assert_raise(ArgumentError) { StateMachine::Transition.perform([@state_transition, @state_transition]) }
+    assert_equal 'Cannot perform multiple transitions in parallel for the same state machine attribute', exception.message
+  end
+  
+  def test_should_perform
+    assert_equal true, @result
+  end
+  
+  def test_should_persist_first_state
+    assert_equal 'idling', @object.state
+  end
+  
+  def test_should_persist_second_state
+    assert_equal 'second_gear', @object.status
+  end
+  
+  def test_should_persist_in_order
+    assert_equal ['idling', 'second_gear'], @object.persisted
+  end
+  
+  def test_should_have_args_in_transitions
+    assert_equal [], @state_transition.args
+    assert_equal [], @status_transition.args
+  end
+end
+
+class TransitionsInParallelWithCallbacksTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
     
     @before_callbacks = []
     @after_callbacks = []
     
-    @state = StateMachine::Machine.new(@klass, :state, :action => :save_state)
+    @state = StateMachine::Machine.new(@klass, :state, :initial => :parked)
     @state.event :ignite
     @state.state :parked, :idling
     @state.before_transition lambda {@before_callbacks << :state}
     @state.after_transition lambda {@after_callbacks << :state}
     
-    @status = StateMachine::Machine.new(@klass, :status, :action => :save_status)
+    @status = StateMachine::Machine.new(@klass, :status, :initial => :first_gear)
     @status.event :shift_up
     @status.state :first_gear, :second_gear
     @status.before_transition lambda {@before_callbacks << :status}
@@ -734,28 +909,9 @@ class TransitionsInParallelTest < Test::Unit::TestCase
     @status_transition = StateMachine::Transition.new(@object, @status, :shift_up, :first_gear, :second_gear)
   end
   
-  def test_should_raise_exception_if_attempted_on_the_same_state_machine
-    exception = assert_raise(ArgumentError) { StateMachine::Transition.perform([@state_transition, @state_transition]) }
-    assert_equal 'Cannot perform multiple transitions in parallel for the same state machine / attribute', exception.message
-  end
-  
-  def test_should_perform
-    assert_equal true, perform
-  end
-  
   def test_should_run_before_callbacks_in_order
     perform
     assert_equal [:state, :status], @before_callbacks
-  end
-  
-  def test_should_persist_in_order
-    perform
-    assert_equal ['idling', 'second_gear'], @object.persisted
-  end
-  
-  def test_should_run_actions_in_order
-    perform
-    assert_equal [:save_state, :save_status], @object.actions
   end
   
   def test_should_run_after_callbacks_in_order
@@ -763,13 +919,18 @@ class TransitionsInParallelTest < Test::Unit::TestCase
     assert_equal [:state, :status], @after_callbacks
   end
   
+  def test_should_not_run_after_callbacks_if_disabled
+    perform(:after => false)
+    assert_equal [], @after_callbacks
+  end
+  
   def test_should_halt_if_before_callback_halted_for_first_transition
     @state.before_transition lambda {throw :halt}
     
     assert_equal false, perform
     assert_equal [:state], @before_callbacks
-    assert_equal [], @object.persisted
-    assert_equal [], @object.actions
+    assert_equal 'parked', @object.state
+    assert_equal 'first_gear', @object.status
     assert_equal [], @after_callbacks
   end
   
@@ -778,39 +939,77 @@ class TransitionsInParallelTest < Test::Unit::TestCase
     
     assert_equal false, perform
     assert_equal [:state, :status], @before_callbacks
-    assert_equal [], @object.persisted
-    assert_equal [], @object.actions
+    assert_equal 'parked', @object.state
+    assert_equal 'first_gear', @object.status
     assert_equal [], @after_callbacks
   end
   
-  def test_should_halt_if_action_halted_for_first_transition
-    @klass.class_eval do
+  def test_should_perform_if_after_callback_halted_for_first_transition
+    @state.after_transition lambda {throw :halt}
+    @state.after_transition lambda {@after_callbacks << :invalid}
+    
+    assert_equal true, perform
+    assert_equal [:state, :status], @before_callbacks
+    assert_equal 'idling', @object.state
+    assert_equal 'second_gear', @object.status
+    assert_equal [:state, :status], @after_callbacks
+  end
+  
+  def test_should_perform_if_after_callback_halted_for_second_transition
+    @status.after_transition lambda {throw :halt}
+    @status.after_transition lambda {@after_callbacks << :invalid}
+    
+    assert_equal true, perform
+    assert_equal [:state, :status], @before_callbacks
+    assert_equal 'idling', @object.state
+    assert_equal 'second_gear', @object.status
+    assert_equal [:state, :status], @after_callbacks
+  end
+  
+  private
+    def perform(options = {})
+      StateMachine::Transition.perform([@state_transition, @status_transition], options)
+    end
+end
+
+class TransitionsInParallelWithActionsTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new do
+      attr_reader :actions
+      
       def save_state
-        @actions << :save_state
-        throw :halt
+        (@actions ||= []) << :save_state
+        :save_state
+      end
+      
+      def save_status
+        (@actions ||= []) << :save_status
+        :save_status
       end
     end
     
-    assert_equal false, perform
-    assert_equal [:state, :status], @before_callbacks
-    assert_equal ['idling', 'second_gear'], @object.persisted
-    assert_equal [:save_state], @object.actions
-    assert_equal [], @after_callbacks
+    @state = StateMachine::Machine.new(@klass, :state, :initial => :parked, :action => :save_state)
+    @state.event :ignite
+    @state.state :parked, :idling
+    
+    @status = StateMachine::Machine.new(@klass, :status, :initial => :first_gear, :action => :save_status)
+    @status.event :shift_up
+    @status.state :first_gear, :second_gear
+    
+    @object = @klass.new
+    @state_transition = StateMachine::Transition.new(@object, @state, :ignite, :parked, :idling)
+    @status_transition = StateMachine::Transition.new(@object, @status, :shift_up, :first_gear, :second_gear)
   end
   
-  def test_should_halt_if_action_halted_for_second_transition
-    @klass.class_eval do
-      def save_status
-        @actions << :save_status
-        throw :halt
-      end
-    end
-    
-    assert_equal false, perform
-    assert_equal [:state, :status], @before_callbacks
-    assert_equal ['idling', 'second_gear'], @object.persisted
+  def test_should_run_actions_in_order
+    perform
     assert_equal [:save_state, :save_status], @object.actions
-    assert_equal [], @after_callbacks
+  end
+  
+  def test_should_store_action_specific_results
+    perform
+    assert_equal :save_state, @state_transition.result
+    assert_equal :save_status, @status_transition.result
   end
   
   def test_should_not_perform_if_action_fails_for_first_transition
@@ -821,6 +1020,8 @@ class TransitionsInParallelTest < Test::Unit::TestCase
     end
     
     assert_equal false, perform
+    assert_equal 'parked', @object.state
+    assert_equal 'first_gear', @object.status
   end
   
   def test_should_not_perform_if_action_fails_for_second_transition
@@ -831,32 +1032,72 @@ class TransitionsInParallelTest < Test::Unit::TestCase
     end
     
     assert_equal false, perform
+    assert_equal 'parked', @object.state
+    assert_equal 'first_gear', @object.status
   end
   
-  def test_should_perform_if_after_callback_halted_for_first_transition
-    @state.after_transition lambda {throw :halt}
-    @state.after_transition lambda {@after_callbacks << :invalid}
+  def test_should_rollback_if_action_errors_for_first_transition
+    @klass.class_eval do
+      def save_state
+        raise ArgumentError
+      end
+    end
     
-    assert_equal true, perform
-    assert_equal [:state, :status], @before_callbacks
-    assert_equal ['idling', 'second_gear'], @object.persisted
-    assert_equal [:save_state, :save_status], @object.actions
-    assert_equal [:state, :status], @after_callbacks
+    begin; perform; rescue; end
+    assert_equal 'parked', @object.state
+    assert_equal 'first_gear', @object.status
   end
   
-  def test_should_perform_if_after_callback_halted_for_second_transition
-    @status.after_transition lambda {throw :halt}
-    @status.after_transition lambda {@after_callbacks << :invalid}
+  def test_should_rollback_if_action_errors_for_second_transition
+    @klass.class_eval do
+      def save_status
+        raise ArgumentError
+      end
+    end
     
-    assert_equal true, perform
-    assert_equal [:state, :status], @before_callbacks
-    assert_equal ['idling', 'second_gear'], @object.persisted
-    assert_equal [:save_state, :save_status], @object.actions
-    assert_equal [:state, :status], @after_callbacks
+    begin; perform; rescue; end
+    assert_equal 'parked', @object.state
+    assert_equal 'first_gear', @object.status
   end
   
   private
-    def perform
-      StateMachine::Transition.perform([@state_transition, @status_transition])
+    def perform(options = {})
+      StateMachine::Transition.perform([@state_transition, @status_transition], options)
     end
+end
+
+class TransitionsWithPerformBlockTest < Test::Unit::TestCase
+  def setup
+    @klass = Class.new
+    
+    @state = StateMachine::Machine.new(@klass, :state, :initial => :parked)
+    @state.event :ignite
+    @state.state :parked, :idling
+    
+    @status = StateMachine::Machine.new(@klass, :status, :initial => :first_gear)
+    @status.event :shift_up
+    @status.state :first_gear, :second_gear
+    
+    @object = @klass.new
+    @state_transition = StateMachine::Transition.new(@object, @state, :ignite, :parked, :idling)
+    @status_transition = StateMachine::Transition.new(@object, @status, :shift_up, :first_gear, :second_gear)
+  end
+  
+  def test_should_be_perform_if_result_is_not_false
+    assert StateMachine::Transition.perform([@state_transition, @status_transition]) { true }
+    assert_equal 'idling', @object.state
+    assert_equal 'second_gear', @object.status
+  end
+  
+  def test_should_not_perform_if_result_is_false
+    assert !StateMachine::Transition.perform([@state_transition, @status_transition]) { false }
+    assert_equal 'parked', @object.state
+    assert_equal 'first_gear', @object.status
+  end
+  
+  def test_should_use_result_as_transition_result
+    StateMachine::Transition.perform([@state_transition, @status_transition]) { 1 }
+    assert_equal 1, @state_transition.result
+    assert_equal 1, @status_transition.result
+  end
 end

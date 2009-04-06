@@ -32,7 +32,14 @@ class AutoShop
   end
 end
 
-class Vehicle
+class ModelBase
+  def save
+    @saved = true
+    self
+  end
+end
+
+class Vehicle < ModelBase
   attr_accessor :auto_shop, :seatbelt_on, :insurance_premium, :force_idle, :callbacks, :saved
   
   def initialize(attributes = {})
@@ -103,7 +110,7 @@ class Vehicle
   end
   
   def save
-    @saved = true
+    super
   end
   
   def new_record?
@@ -172,22 +179,34 @@ class TrafficLight
     end
     
     state :stop do
-      def color
-        'red'
+      def color(transform)
+        value = 'red'
+        
+        if block_given?
+          yield value
+        else
+          value.send(transform)
+        end
+        
+        value
       end
     end
     
     state :proceed do
-      def color
+      def color(transform)
         'green'
       end
     end
     
     state :caution do
-      def color
+      def color(transform)
         'yellow'
       end
     end
+  end
+  
+  def color(transform = :to_s)
+    super
   end
 end
 
@@ -211,7 +230,7 @@ class VehicleUnsavedTest < Test::Unit::TestCase
   end
   
   def test_should_raise_exception_if_checking_invalid_state
-    assert_raise(ArgumentError) { @vehicle.state?(:invalid) }
+    assert_raise(IndexError) { @vehicle.state?(:invalid) }
   end
   
   def test_should_raise_exception_if_getting_name_of_invalid_state
@@ -686,6 +705,34 @@ class VehicleWithParallelEventsTest < Test::Unit::TestCase
   end
 end
 
+class VehicleWithEventAttributesTest < Test::Unit::TestCase
+  def setup
+    @vehicle = Vehicle.new
+    @vehicle.state_event = 'ignite'
+  end
+  
+  def test_should_fail_if_event_is_invalid
+    @vehicle.state_event = 'invalid'
+    assert !@vehicle.save
+    assert_equal 'parked', @vehicle.state
+  end
+  
+  def test_should_fail_if_event_has_no_transition
+    @vehicle.state_event = 'park'
+    assert !@vehicle.save
+    assert_equal 'parked', @vehicle.state
+  end
+  
+  def test_should_return_original_action_value_on_success
+    assert_equal @vehicle, @vehicle.save
+  end
+  
+  def test_should_transition_state_on_success
+    @vehicle.save
+    assert_equal 'idling', @vehicle.state
+  end
+end
+
 class MotorcycleTest < Test::Unit::TestCase
   def setup
     @motorcycle = Motorcycle.new
@@ -859,6 +906,15 @@ class TrafficLightStopTest < Test::Unit::TestCase
   
   def test_should_use_stop_color
     assert_equal 'red', @light.color
+  end
+  
+  def test_should_pass_arguments_through
+    assert_equal 'RED', @light.color(:upcase!)
+  end
+  
+  def test_should_pass_block_through
+    color = @light.color {|value| value.upcase!}
+    assert_equal 'RED', color
   end
 end
 

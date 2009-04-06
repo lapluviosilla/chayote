@@ -64,6 +64,10 @@ begin
       def test_should_use_save_as_action
         assert_equal :save, @machine.action
       end
+      
+      def test_should_not_use_transactions
+        assert_equal false, @machine.use_transactions
+      end
     end
     
     class MachineTest < BaseTestCase
@@ -125,13 +129,13 @@ begin
         assert_equal [idling], @resource.without_state(:parked).with_state(:idling)
       end
       
-      def test_should_rollback_transaction_if_false
+      def test_should_not_rollback_transaction_if_false
         @machine.within_transaction(@resource.new) do
           @resource.create
           false
         end
         
-        assert_equal 0, @resource.all.size
+        assert_equal 1, @resource.all.size
       end
       
       def test_should_not_rollback_transaction_if_true
@@ -245,7 +249,7 @@ begin
         assert called
       end
       
-      def test_should_pass_transition_into_before_callbacks_with_one_argument
+      def test_should_pass_transition_to_before_callbacks_with_one_argument
         transition = nil
         @machine.before_transition(lambda {|arg| transition = arg})
         
@@ -253,7 +257,7 @@ begin
         assert_equal @transition, transition
       end
       
-      def test_should_pass_transition_into_before_callbacks_with_multiple_arguments
+      def test_should_pass_transition_to_before_callbacks_with_multiple_arguments
         callback_args = nil
         @machine.before_transition(lambda {|*args| callback_args = args})
         
@@ -277,12 +281,12 @@ begin
         assert called
       end
       
-      def test_should_pass_transition_and_result_into_after_callbacks_with_multiple_arguments
+      def test_should_pass_transition_to_after_callbacks_with_multiple_arguments
         callback_args = nil
         @machine.after_transition(lambda {|*args| callback_args = args})
         
         @transition.perform
-        assert_equal [@transition, true], callback_args
+        assert_equal [@transition], callback_args
       end
       
       def test_should_run_after_callbacks_with_the_context_of_the_record
@@ -369,28 +373,6 @@ begin
           assert !called
         end
         
-        def test_should_allow_targeting_specific_machine
-          @second_machine = StateMachine::Machine.new(@resource, :status)
-          
-          called_state = false
-          called_status = false
-          
-          observer = new_observer(@resource) do
-            before_transition :state, :from => :parked do
-              called_state = true
-            end
-            
-            before_transition :status, :from => :parked do
-              called_status = true
-            end
-          end
-          
-          @transition.perform
-          
-          assert called_state
-          assert !called_status
-        end
-        
         def test_should_pass_transition_to_before_callbacks
           callback_args = nil
           
@@ -430,7 +412,7 @@ begin
           assert !called
         end
         
-        def test_should_pass_transition_and_result_to_before_callbacks
+        def test_should_pass_transition_to_after_callbacks
           callback_args = nil
           
           observer = new_observer(@resource) do
@@ -440,7 +422,61 @@ begin
           end
           
           @transition.perform
-          assert_equal [@transition, true], callback_args
+          assert_equal [@transition], callback_args
+        end
+        
+        def test_should_raise_exception_if_targeting_invalid_machine
+          assert_raise(RUBY_VERSION < '1.9' ? IndexError : KeyError) do
+            new_observer(@resource) do
+              before_transition :invalid, :from => :parked do
+              end
+            end
+          end
+        end
+        
+        def test_should_allow_targeting_specific_machine
+          @second_machine = StateMachine::Machine.new(@resource, :status)
+          @resource.auto_migrate!
+          
+          called_state = false
+          called_status = false
+          
+          observer = new_observer(@resource) do
+            before_transition :state, :from => :parked do
+              called_state = true
+            end
+            
+            before_transition :status, :from => :parked do
+              called_status = true
+            end
+          end
+          
+          @transition.perform
+          
+          assert called_state
+          assert !called_status
+        end
+        
+        def test_should_allow_targeting_multiple_specific_machines
+          @second_machine = StateMachine::Machine.new(@resource, :status)
+          @second_machine.state :parked, :idling
+          @second_machine.event :ignite
+          @resource.auto_migrate!
+          
+          called_attribute = nil
+          
+          attributes = []
+          observer = new_observer(@resource) do
+            before_transition :state, :status, :from => :parked do |transition|
+              called_attribute = transition.attribute
+            end
+          end
+          
+          @transition.perform
+          assert_equal :state, called_attribute
+          
+          StateMachine::Transition.new(@record, @second_machine, :ignite, :parked, :idling).perform
+          assert_equal :status, called_attribute
         end
       end
       
@@ -502,9 +538,9 @@ begin
           record = @resource.new
           record.state = 'parked'
           
-          @machine.invalidate(record, StateMachine::Event.new(@machine, :park))
+          @machine.invalidate(record, :state, :invalid_transition, [[:event, :park]])
           
-          assert_equal ['cannot be transitioned via :park from :parked'], record.errors.on(:state)
+          assert_equal ['cannot transition via "park"'], record.errors.on(:state)
         end
         
         def test_should_clear_errors_on_reset
@@ -543,6 +579,57 @@ begin
         def test_should_be_valid_if_validation_succeeds_within_state_scope
           record = @resource.new(:state => 'second_gear', :seatbelt => true)
           assert record.valid?
+        end
+      end
+      
+      class MachineWithEventAttributesOnValidationTest < BaseTestCase
+        def setup
+          @resource = new_resource
+          @machine = StateMachine::Machine.new(@resource)
+          @machine.event :ignite do
+            transition :parked => :idling
+          end
+          
+          @record = @resource.new
+          @record.state = 'parked'
+          @record.state_event = 'ignite'
+        end
+        
+        def test_should_fail_if_event_is_invalid
+          @record.state_event = 'invalid'
+          assert !@record.valid?
+          assert_equal ['is invalid'], @record.errors.full_messages
+        end
+        
+        def test_should_fail_if_event_has_no_transition
+          @record.state = 'idling'
+          assert !@record.valid?
+          assert_equal ['cannot transition when idling'], @record.errors.full_messages
+        end
+        
+        def test_should_be_successful_if_event_has_transition
+          assert @record.valid?
+        end
+        
+        def test_should_run_before_callbacks
+          ran_callback = false
+          @machine.before_transition { ran_callback = true }
+          
+          @record.valid?
+          assert ran_callback
+        end
+        
+        def test_should_persist_new_state
+          @record.valid?
+          assert_equal 'idling', @record.state
+        end
+        
+        def test_should_not_run_after_callbacks
+          ran_callback = false
+          @machine.after_transition { ran_callback = true }
+          
+          @record.valid?
+          assert !ran_callback
         end
       end
     rescue LoadError

@@ -11,5 +11,11 @@ Factory.define :user do |f|
   f.email { Factory.next(:email) }
   f.password "testing"
   f.password_confirmation "testing"
-  f.state :active
+  f.state { User.state_machine.state(:active).value }
+  f.activated_at 5.days.ago
+end
+
+Factory.define :new_user, :parent => :user do |f|
+  f.state { User.state_machine.state(:passive).value }
+  f.activated_at nil
 end

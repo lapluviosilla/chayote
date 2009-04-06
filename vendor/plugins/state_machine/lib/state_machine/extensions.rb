@@ -10,12 +10,12 @@ module StateMachine
     
     # Gets the current list of state machines defined for this class.  This
     # class-level attribute acts like an inheritable attribute.  The attribute
-    # is available to each subclass, each subclass having a copy of its
-    # superclass's attribute.
+    # is available to each subclass, each having a copy of its superclass's
+    # attribute.
     # 
-    # The hash of state machines maps +attribute+ => +machine+, e.g.
+    # The hash of state machines maps <tt>:attribute</tt> => +machine+, e.g.
     # 
-    #   Vehicle.state_machines # => {:state => #<StateMachine::Machine:0xb6f6e4a4 ...>
+    #   Vehicle.state_machines # => {:state => #<StateMachine::Machine:0xb6f6e4a4 ...>}
     def state_machines
       @state_machines ||= superclass.state_machines.dup
     end
@@ -130,7 +130,7 @@ module StateMachine
     #       end
     #     end
     #     
-    #     state_machine :alarm_state, :namespace => 'alarm', :initial => :on do
+    #     state_machine :alarm_state, :namespace => 'alarm', :initial => :active do
     #       event :enable do
     #         transition all => :active
     #       end

@@ -16,16 +16,27 @@ module StateMachine
     # * <tt>:action</tt> - The instance method to invoke when an object
     #   transitions. Default is nil unless otherwise specified by the
     #   configured integration.
-    # * <tt>:plural</tt> - The pluralized name of the attribute.  By default,
-    #   this will attempt to call +pluralize+ on the attribute, otherwise
-    #   an "s" is appended.  This is used for generating scopes.
     # * <tt>:namespace</tt> - The name to use for namespacing all generated
     #   instance methods (e.g. "heater" would generate :turn_on_heater and
     #   :turn_off_heater for the :turn_on/:turn_off events).  Default is nil.
     # * <tt>:integration</tt> - The name of the integration to use for adding
-    #   library-specific behavior to the machine.  Built-in integrations include
-    #   :data_mapper, :active_record, and :sequel.  By default, this is
-    #   determined automatically.
+    #   library-specific behavior to the machine.  Built-in integrations
+    #   include :data_mapper, :active_record, and :sequel.  By default, this
+    #   is determined automatically.
+    # 
+    # Configuration options relevant to ORM integrations:
+    # * <tt>:plural</tt> - The pluralized name of the attribute.  By default,
+    #   this will attempt to call +pluralize+ on the attribute.  If this
+    #   method is not available, an "s" is appended.  This is used for
+    #   generating scopes.
+    # * <tt>:messages</tt> - The error messages to use when invalidating
+    #   objects due to failed transitions.  Messages include:
+    #   * <tt>:invalid</tt>
+    #   * <tt>:invalid_event</tt>
+    #   * <tt>:invalid_transition</tt>
+    # * <tt>:use_transactions</tt> - Whether transactions should be used when
+    #   firing events.  Default is true unless otherwise specified by the
+    #   configured integration.
     # 
     # This also expects a block which will be used to actually configure the
     # states, events and transitions for the state machine.  *Note* that this
@@ -85,10 +96,9 @@ module StateMachine
     #   state.  If the name is not a known state, then an ArgumentError is raised.
     # * <tt>state_name</tt> - Gets the name of the state for the current value
     # * <tt>state_events</tt> - Gets the list of events that can be fired on
-    #   the current object's state (will use the *unqalified* event names)
-    # * <tt>state_transitions(include_no_op = false)</tt> - Gets the
-    #   list of possible transitions that can be made on the current object's
-    #   state
+    #   the current object's state (uses the *unqualified* event names)
+    # * <tt>state_transitions</tt> - Gets the list of possible transitions
+    #   that can be made on the current object's state
     # 
     # For example,
     # 
@@ -231,12 +241,48 @@ module StateMachine
     # Each predicate method will return true if it matches the object's
     # current state.  Otherwise, it will return false.
     # 
-    # When a namespace is configured for a state machine, the name will be
-    # prepended to each state predicate like so:
-    # * <tt>car_parked?</tt>
-    # * <tt>car_idling?</tt>
-    # 
     # == Events and Transitions
+    # 
+    # Events defined on the machine are the interface to transitioning states
+    # for an object.  Events can be fired either directly (through the method
+    # generated for the event) or indirectly (through attributes defined on
+    # the machine).
+    # 
+    # For example,
+    # 
+    #   class Vehicle
+    #     include DataMapper::Resource
+    #     property :id, Integer, :serial => true
+    #     
+    #     state_machine :initial => :parked do
+    #       event :ignite do
+    #         transition :parked => :idling
+    #       end
+    #     end
+    #     
+    #     state_machine :alarm_state, :initial => :active do
+    #       event :disable do
+    #         transition all => :off
+    #       end
+    #     end
+    #   end
+    #   
+    #   # Fire +ignite+ event directly
+    #   vehicle = Vehicle.create    # => #<Vehicle id=1 state="parked" alarm_state="active">
+    #   vehicle.ignite              # => true
+    #   vehicle.state               # => "idling"
+    #   vehicle.alarm_state         # => "active"
+    #   
+    #   # Fire +disable+ event automatically
+    #   vehicle.alarm_state_event = 'disable'
+    #   vehicle.save                # => true
+    #   vehicle.alarm_state         # => "off"
+    # 
+    # In the above example, the +state+ attribute is transitioned using the
+    # +ignite+ action that's generated from the state machine.  On the other
+    # hand, the +alarm_state+ attribute is transitioned using the +alarm_state_event+
+    # attribute that automatically gets fired when the machine's action (+save+)
+    # is invoked.
     # 
     # For more information about how to configure an event and its associated
     # transitions, see StateMachine::Machine#event.
@@ -250,8 +296,8 @@ module StateMachine
     # 
     # == Namespaces
     # 
-    # When a namespace is configured for a state machine, the name provided will
-    # be used in generating the instance methods for interacting with
+    # When a namespace is configured for a state machine, the name provided
+    # will be used in generating the instance methods for interacting with
     # events/states in the machine.  This is particularly useful when a class
     # has multiple state machines and it would be difficult to differentiate
     # between the various states / events.
@@ -311,11 +357,11 @@ module StateMachine
     # 
     # For example,
     # 
-    #   Vehicle.with_state(:parked) # => Finds all vehicles where the state is parked
-    #   Vehicle.with_states(:parked, :idling) # => Finds all vehicles where the state is either parked or idling
+    #   Vehicle.with_state(:parked)               # => All vehicles where the state is parked
+    #   Vehicle.with_states(:parked, :idling)     # => All vehicles where the state is either parked or idling
     #   
-    #   Vehicle.without_state(:parked) # => Finds all vehicles where the state is *not* parked
-    #   Vehicle.without_states(:parked, :idling) # => Finds all vehicles where the state is *not* parked or idling
+    #   Vehicle.without_state(:parked)            # => All vehicles where the state is *not* parked
+    #   Vehicle.without_states(:parked, :idling)  # => All vehicles where the state is *not* parked or idling
     # 
     # *Note* that if class methods already exist with those names (i.e.
     # :with_state, :with_states, :without_state, or :without_states), then a

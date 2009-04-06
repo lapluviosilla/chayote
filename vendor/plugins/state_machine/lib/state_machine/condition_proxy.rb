@@ -56,7 +56,7 @@ module StateMachine
       @condition = condition
     end
     
-    # Hooks in condition merging to methods that don't exist in this module
+    # Hooks in condition-merging to methods that don't exist in this module
     def method_missing(*args, &block)
       # Get the configuration
       if args.last.is_a?(Hash)
@@ -77,8 +77,8 @@ module StateMachine
       # Replace the configuration condition with the one configured for this
       # proxy, merging together any existing conditions
       options[:if] = lambda do |*args|
-        # Block may be executed within the context of the actual object, so it'll
-        # either be the first argument or the executing context
+        # Block may be executed within the context of the actual object, so
+        # it'll either be the first argument or the executing context
         object = args.first || self
         
         proxy.evaluate_method(object, proxy_condition) &&
