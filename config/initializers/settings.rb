@@ -1,0 +1,1 @@
+Settings.defaults[:require_activation] = true

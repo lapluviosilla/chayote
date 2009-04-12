@@ -14,9 +14,11 @@ class UsersController < ApplicationController
  
   def create
     logout_keeping_session!
-    @user = User.new(params[:user])
-    logger.warn "Before changing to register"
-    @user.register if @user && @user.save
+    # Not sure if this is necessary
+    User.transaction do
+      @user = User.create(params['user'])
+      @user.register if @user
+    end
     success = @user && @user.valid?
     if success && @user.errors.empty?
       redirect_back_or_default('/')

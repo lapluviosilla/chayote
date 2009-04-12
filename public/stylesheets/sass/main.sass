@@ -13,7 +13,7 @@ a
   :text-decoration none
   :border-bottom 1px solid #CCCCCC
   / Remove outline that appears when you click on a link in FireFox
-  &:hover
+  &:hover, &:link, &:active, &:visited
     :outline-color -moz-use-text-color
     :outline-style none
     :outline-width medium
@@ -51,8 +51,8 @@ body
       :size 17px
       :weight bold
   a:hover
-    :color blue
-    :border-bottom 1px solid blue
+    :color orange
+    :border-bottom 1px solid orange
 #mainbar
   :height 42px
   :padding-left 40px
@@ -73,4 +73,14 @@ body
         :background transparent url(/images/default-tab-off-right-blue.png) no-repeat scroll right top
         :text-decoration none
         :display block
-        :padding 12px 14px 24px 8px
+        :padding 15px 14px 24px 8px
+    #current
+      :background transparent url(/images/default-tab-on-left-blue.png) no-repeat scroll left top
+      a
+        :background transparent url(/images/default-tab-on-right-blue.png) no-repeat scroll left top
+        :color black
+        :padding-right 19px
+
+/* Content and body
+#content
+  :margin 15px 15px 15px 15px

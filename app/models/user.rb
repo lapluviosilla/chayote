@@ -26,8 +26,7 @@ class User < ActiveRecord::Base
   include Authentication::ByPassword
   include Authentication::ByCookieToken
   #include Authorization::AasmRoles
-
-  validates_presence_of     :login
+  
   validates_length_of       :login,    :within => 3..40
   validates_uniqueness_of   :login
   validates_format_of       :login,    :with => Authentication.login_regex, :message => Authentication.bad_login_message
@@ -40,6 +39,7 @@ class User < ActiveRecord::Base
   validates_uniqueness_of   :email
   validates_format_of       :email,    :with => Authentication.email_regex, :message => Authentication.bad_email_message
   
+  validates_presence_of     :state
 
   # HACK HACK HACK -- how to do attr_accessible from here?
   # prevents a user from submitting a crafted form that bypasses activation
@@ -49,9 +49,9 @@ class User < ActiveRecord::Base
   # Account status state machine
   state_machine :initial => :passive do
     
-    after_transition :on => :register, :do => :make_activation_code
-    after_transition :on => :activate, :do => :do_activate
-    after_transition :on => :delete, :do => :do_delete
+    before_transition :on => :register, :do => :make_activation_code
+    before_transition :on => :activate, :do => :do_activate
+    before_transition :on => :delete, :do => :do_delete
     
     event :register do
       # Change state to pending and send out activation code. Do not change states if password has not been set.
@@ -79,8 +79,8 @@ class User < ActiveRecord::Base
     end
   end
   
-  def initialize
-    super()
+  def initialize *args
+    super
   end
       
   # Authenticates a user by their login name and unencrypted password.  Returns the user or nil.
@@ -91,9 +91,8 @@ class User < ActiveRecord::Base
   #
   def self.authenticate(login, password)
     return nil if login.blank? || password.blank?
-    # Old code from AASM states. Keep for now.
-    # u = find_in_state :first, :active, :conditions => {:login => login.downcase} # need to get the salt
-    u = with_state(:active).find(:first, :conditions => {:login => login.downcase})
+    # Find all active users with either a login or email of :login
+    u = with_state(:active).first(:conditions => ["login = :login OR email = :login", {:login => login.downcase}])
     u && u.authenticated?(password) ? u : nil
   end
   

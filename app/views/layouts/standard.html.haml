@@ -17,6 +17,9 @@
       %span#logo Chayote
     #mainbar
       %ul#maintabs
+        %li= link_to "Timesheets", {:controller => "testlayout", :action => "index"}
         %li= link_to "Reports", {:controller => "testlayout", :action => "index"}
-        %li= link_to "Invoices", {:controller => "testlayout", :action => "index"}
-    =yield
+        %li= link_to "Manage"
+    #content
+      =flash
+      =yield
